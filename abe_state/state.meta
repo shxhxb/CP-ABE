@@ -1,0 +1,5 @@
+n_attrs=2
+n_users=16
+rbits=160
+qbits=512
+policy=AND(attr0,attr1)

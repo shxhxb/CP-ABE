@@ -1,0 +1,8 @@
+{
+  "format": "cpabe-core-v1",
+  "policy": "AND(attr0,attr1)",
+  "owner_label": "alice_meta",
+  "source_name": "sourcedoc.txt",
+  "state_dir": "_abe_state",
+  "cipher_file": "out.ct"
+}

@@ -1,0 +1,1 @@
+ C:/msys64/ucrt64/lib/libpbc.dll.a C:/msys64/ucrt64/lib/libgmp.dll.a C:/msys64/ucrt64/lib/libcrypto.dll.a -lws2_32 -lkernel32 -luser32 -lgdi32 -lwinspool -lshell32 -lole32 -loleaut32 -luuid -lcomdlg32 -ladvapi32 

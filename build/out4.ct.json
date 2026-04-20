@@ -1,0 +1,8 @@
+{
+  "format": "cpabe-core-v1",
+  "policy": "AND(attr0,attr1)",
+  "owner_label": "o",
+  "source_name": "s",
+  "state_dir": "_abe4",
+  "cipher_file": "out4.ct"
+}

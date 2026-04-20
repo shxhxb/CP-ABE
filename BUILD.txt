@@ -1,0 +1,50 @@
+CP-ABE (Guo et al., 密码学报 2023) — C 参考实现
+================================================
+
+依赖:
+  - CMake 3.16+
+  - GMP (libgmp)
+  - PBC (libpbc) — Stanford Pairing-Based Crypto
+  - OpenSSL (libcrypto) — SHA-256 与 AES
+
+Windows (MSYS2 / MinGW 示例):
+  pacman -S mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-gmp mingw-w64-x86_64-openssl
+  # PBC 需从源码编译安装到 /mingw64 前缀，或设置 CMAKE_PREFIX_PATH 指向 PBC 安装目录
+  # 若使用 UCRT64，请将上面包名替换为 mingw-w64-ucrt-x86_64-*
+
+Linux (Debian/Ubuntu):
+  sudo apt install build-essential cmake libgmp-dev libpbc-dev libssl-dev
+
+构建:
+  mkdir build && cd build
+  cmake .. -DCMAKE_BUILD_TYPE=Release
+  cmake --build .
+
+运行:
+  ./cp_abe_demo   (或 cp_abe_demo.exe)
+  # 支持参数: cp_abe_demo <user_id> <message>
+
+  ./cp_abe_cli <子命令> ...   (或 cp_abe_cli.exe)
+  # 子命令: init / keygen / encrypt / decrypt / trace / revoke / demo / roundtrip-bin
+  # 详见: cp_abe_cli（无参数时打印 Usage）
+
+GUI:
+  python gui.py
+  # 默认调用 build/cp_abe_cli.exe；所有操作均为子进程调用 cp_abe_cli。
+  # 流程: 设置「状态目录」→ init → 对各用户 keygen（user_index 与 init 的 n_users 一致）→ encrypt / decrypt。
+  # 追溯: trace 需泄露的 sk.bin；撤销: revoke 将 user_id 写入状态目录 revoked.txt。
+
+说明:
+  - 本工程为论文算法流程的可运行演示，配对参数默认使用 Type A 生成 (与论文 JPBC Type A 一致)。
+  - 若系统未安装 PBC，CMake 会报错；请先安装 PBC 并设置 PBC_ROOT 或 CMAKE_PREFIX_PATH。
+
+密文与状态里的 G1/GT 依赖 PBC 的 element_to_bytes / element_from_bytes。
+在部分 Windows + MinGW 环境下，配对元经磁盘往返后可能与内存中 element_cmp 不一致，导致 roundtrip-bin 或 decrypt 出现 DU（AES）失败；若在 WSL/Linux 下用同一套代码可正常往返，多为本机 PBC 二进制与序列化行为问题，可尝试自编译 PBC 或在 Linux 侧运行 CLI。
+
+PBC 随机数警告 (Windows 常见):
+  若运行 cp_abe_cli / cp_abe_demo 时出现:
+    warning: could not open /dev/urandom, using deterministic random number generator
+  含义: PBC 默认尝试从 Unix 设备 /dev/urandom 读熵；在原生 Windows 可执行环境下通常不存在该路径，
+  于是回退到「确定性」伪随机（每次运行序列可重复，不适合真实部署，本地跑通算法演示一般可接受）。
+  若需密码学意义上的安全随机: 在 Linux/WSL 下运行并链接使用 /dev/urandom 的 PBC；或自行从带 Win CNG/CryptGenRandom
+  支持的 PBC 构建安装（MSYS2 官方二进制是否启用视包维护者配置而定）。
