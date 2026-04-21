@@ -480,7 +480,50 @@ int abe_du_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ct_t *ct, co
   pairing_apply(eK, sk->K, ct->Cp, pairing);
   element_div(Rp, Rp, eK);
 
-  /* 临时诊断：确认 R' 恢复链路是否与密文里的 R 一致。 */
+  /* 临时诊断：枚举若干 R' 组合，定位 DU 公式偏差。 */
+  element_t tct_pow_z;
+  element_init_GT(tct_pow_z, pairing);
+  element_pow_zn(tct_pow_z, *tct, sk->z);
+  element_t cand;
+  element_init_GT(cand, pairing);
+#define DIAG_EQ(label, use_mul_tct, use_mul_p, use_inv_z, use_mul_ek)                                      \
+  do {                                                                                                      \
+    element_set(cand, ct->C);                                                                               \
+    if (use_inv_z) {                                                                                       \
+      if (use_mul_tct)                                                                                     \
+        element_mul(cand, cand, tct_pow_z);                                                                \
+      else                                                                                                 \
+        element_div(cand, cand, tct_pow_z);                                                                \
+    } else {                                                                                               \
+      if (use_mul_tct)                                                                                     \
+        element_mul(cand, cand, tct_pow);                                                                  \
+      else                                                                                                 \
+        element_div(cand, cand, tct_pow);                                                                  \
+    }                                                                                                      \
+    if (use_mul_p)                                                                                         \
+      element_mul(cand, cand, P);                                                                          \
+    else                                                                                                   \
+      element_div(cand, cand, P);                                                                          \
+    if (use_mul_ek)                                                                                        \
+      element_mul(cand, cand, eK);                                                                         \
+    else                                                                                                   \
+      element_div(cand, cand, eK);                                                                         \
+    fprintf(stderr, "[DU DIAG] %s eqR=%d\n", label, element_cmp(cand, ct->R) == 0 ? 1 : 0);              \
+  } while (0)
+  DIAG_EQ("C*t(1/z)*P/eK", 1, 1, 0, 0);
+  DIAG_EQ("C/t(1/z)*P/eK", 0, 1, 0, 0);
+  DIAG_EQ("C*t(1/z)/P/eK", 1, 0, 0, 0);
+  DIAG_EQ("C/t(1/z)/P/eK", 0, 0, 0, 0);
+  DIAG_EQ("C*t(z)*P/eK", 1, 1, 1, 0);
+  DIAG_EQ("C/t(z)*P/eK", 0, 1, 1, 0);
+  DIAG_EQ("C*t(z)/P/eK", 1, 0, 1, 0);
+  DIAG_EQ("C/t(z)/P/eK", 0, 0, 1, 0);
+  DIAG_EQ("C*t(1/z)*P*eK", 1, 1, 0, 1);
+  DIAG_EQ("C/t(1/z)*P*eK", 0, 1, 0, 1);
+#undef DIAG_EQ
+  element_clear(cand);
+  element_clear(tct_pow_z);
+
   int rp_eq_r = (element_cmp(Rp, ct->R) == 0);
   uint8_t rbuf_rp[element_length_in_bytes(Rp)];
   uint8_t rbuf_r[element_length_in_bytes(ct->R)];
