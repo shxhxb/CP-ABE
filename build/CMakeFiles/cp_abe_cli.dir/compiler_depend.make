@@ -489,6 +489,7 @@ CMakeFiles/cp_abe_cli.dir/src/cli_cp_abe.c.obj: D:/code/CP-ABE/src/cli_cp_abe.c 
   C:/msys64/ucrt64/lib/gcc/x86_64-w64-mingw32/15.2.0/include/xtestintrin.h \
   D:/code/CP-ABE/src/abe_core.h \
   D:/code/CP-ABE/src/abe_ct_pack.h \
+  D:/code/CP-ABE/src/abe_io.h \
   D:/code/CP-ABE/src/abe_state.h \
   D:/code/CP-ABE/src/kek_tree.h \
   D:/code/CP-ABE/src/lsss.h
