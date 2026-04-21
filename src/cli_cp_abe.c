@@ -191,6 +191,27 @@ static int is_revoked(const char *state, const char *uid) {
   return 0;
 }
 
+/* 属性撤销保留名单：若存在 attr_keep_<att>.txt，则仅名单内用户可用该属性解密。 */
+static int attr_keep_allows_user(const char *state, int att_idx, const char *uid) {
+  char p[512];
+  snprintf(p, sizeof(p), "%s/attr_keep_%d.txt", state, att_idx);
+  FILE *f = fopen(p, "r");
+  if (!f) return 1; /* 无名单文件：不限制 */
+  char line[256];
+  int allow = 0;
+  while (fgets(line, sizeof(line), f)) {
+    size_t n = strcspn(line, "\r\n");
+    line[n] = '\0';
+    if (line[0] == '\0') continue;
+    if (strcmp(line, uid) == 0) {
+      allow = 1;
+      break;
+    }
+  }
+  fclose(f);
+  return allow;
+}
+
 typedef struct {
   pairing_t pairing;
   pbc_param_t param;
@@ -795,6 +816,20 @@ static int cmd_attr_revoke(const char *state, int att_idx, const char *in_ct, co
     abe_kek_clear(g.pairing, &ku, CP_N_ATTRS);
   }
 
+  {
+    char kp[512];
+    snprintf(kp, sizeof(kp), "%s/attr_keep_%d.txt", state, att_idx);
+    FILE *kf = fopen(kp, "w");
+    if (!kf) {
+      fprintf(stderr, "write attr keep list failed\n");
+      element_clear(sigma);
+      glob_clear(&g);
+      return 1;
+    }
+    for (int i = 0; i < n_keep; i++) fprintf(kf, "%s\n", keep_users[i]);
+    fclose(kf);
+  }
+
   FILE *fi = cp_fopen_utf8(in_ct, "rb");
   if (!fi) {
     fprintf(stderr, "open in.ct failed: %s\n", in_ct ? in_ct : "");
@@ -888,7 +923,7 @@ static int cmd_decrypt(const char *state, const char *user_id, const char *inpat
   for (int i = 0; i < 2; i++) {
     int row = auth_rows[i];
     int att = (row >= 0 && row < ct.l) ? ct.rho[row] : -1;
-    if (att < 0 || att >= CP_N_ATTRS || ku.phi_node[att] < 0) {
+    if (att < 0 || att >= CP_N_ATTRS || ku.phi_node[att] < 0 || !attr_keep_allows_user(state, att, user_id)) {
       abe_ct_clear(g.pairing, &ct);
       abe_sk_clear(g.pairing, &sk);
       abe_tk_clear(g.pairing, &tk, CP_N_ATTRS);

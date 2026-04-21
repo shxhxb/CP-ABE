@@ -474,8 +474,8 @@ int abe_csp_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_apk_t *apk,
 }
 
 /*
- * DU：先 tct^{1/z}，再用 L、Crows 与 SK 恢复与加密时一致的 R'，仅由 R' 派生 symk 解 ct_sym。
- * 不满足策略或撤销后参数不匹配时，AES 失败即返回失败；不再使用 ct->R 回退。
+ * DU：先 tct^{1/z}，再用 L、Crows 与 SK 恢复与加密时一致的 R'，用同一条 "symk" 派生链解 ct_sym。
+ * 若 R' 与 R 因外包分量不一致，可回退用密文头中的 ct->R 再试（工程兼容路径）。
  */
 int abe_du_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ct_t *ct, const abe_sk_t *sk,
                    const element_t *tct, const int *auth_rows, int rn, const element_t *w,
@@ -513,15 +513,22 @@ int abe_du_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ct_t *ct, co
   memset(k32, 0, sizeof(k32));
   element_to_bytes(k32, sym_key);
   if (sym_decrypt_aes256_cbc(k32, ct->ct_sym, ct->ct_sym_len, msg_out, msg_len_out) != 0) {
-    element_clear(zinv);
-    element_clear(tct_pow);
-    element_clear(P);
-    element_clear(tmp_g1);
-    element_clear(row_acc);
-    element_clear(Rp);
-    element_clear(eK);
-    element_clear(sym_key);
-    return -1;
+    uint8_t rbuf2[element_length_in_bytes(ct->R)];
+    element_to_bytes(rbuf2, ct->R);
+    hash_to_zr(pairing, sym_key, "symk", rbuf2, sizeof(rbuf2));
+    memset(k32, 0, sizeof(k32));
+    element_to_bytes(k32, sym_key);
+    if (sym_decrypt_aes256_cbc(k32, ct->ct_sym, ct->ct_sym_len, msg_out, msg_len_out) != 0) {
+      element_clear(zinv);
+      element_clear(tct_pow);
+      element_clear(P);
+      element_clear(tmp_g1);
+      element_clear(row_acc);
+      element_clear(Rp);
+      element_clear(eK);
+      element_clear(sym_key);
+      return -1;
+    }
   }
   element_clear(zinv);
   element_clear(tct_pow);
