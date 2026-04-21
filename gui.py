@@ -66,7 +66,12 @@ class ABEGui(tk.Tk):
         self.geometry("980x720")
 
         self._project_root = os.path.dirname(os.path.abspath(__file__))
-        self.identities = ["user_alice", "user_bob", "user_carol"]
+        # (user_id, 属性下标元组)，与密文策略 AND(attr0,attr1) 对应；keygen 将传入 cp_abe_cli
+        self.identity_rows: list[tuple[str, tuple[int, ...]]] = [
+            ("user_alice", (0, 1)),
+            ("user_bob", (0, 1)),
+            ("user_carol", (0, 1)),
+        ]
         self.exe_var = tk.StringVar(value=self.default_exe_path())
         # 与 cli 默认一致：工程根下 abe_state（init 会创建；勿指向需管理员权限的目录）
         self.state_var = tk.StringVar(value=os.path.join(self._project_root, "abe_state"))
@@ -76,6 +81,7 @@ class ABEGui(tk.Tk):
         self.owner_var = tk.StringVar(value="user_alice")
         self.actor_var = tk.StringVar(value="user_alice")
         self.new_identity_var = tk.StringVar()
+        self.new_attrs_var = tk.StringVar(value="0,1")
         self.input_file_var = tk.StringVar()
         self.out_ct_var = tk.StringVar()
         self.package_file_var = tk.StringVar()
@@ -173,12 +179,22 @@ class ABEGui(tk.Tk):
         ttk.Entry(init, textvariable=self.init_n_users, width=6).grid(row=0, column=5, sticky="w", padx=6)
         ttk.Button(init, text="执行 init", command=self.do_init).grid(row=0, column=6, padx=(16, 0))
 
-        idf = ttk.LabelFrame(parent, text="身份列表（用于下拉框；keygen 需指定 user_index）", padding=8)
+        idf = ttk.LabelFrame(
+            parent,
+            text="身份列表（点击添加时指定属性；keygen 会按此授权 attr0/attr1；需与 user_index 配合）",
+            padding=8,
+        )
         idf.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(12, 0))
-        ttk.Label(idf, text="新增身份").grid(row=0, column=0, sticky="w")
-        ttk.Entry(idf, textvariable=self.new_identity_var, width=22).grid(row=0, column=1, sticky="w", padx=6)
-        ttk.Button(idf, text="添加", command=self.add_identity).grid(row=0, column=2, sticky="w")
-        ttk.Button(idf, text="删除选中", command=self.remove_identity).grid(row=0, column=3, sticky="w", padx=6)
+        idf.rowconfigure(1, weight=0)
+        row_add = ttk.Frame(idf)
+        row_add.grid(row=0, column=0, columnspan=4, sticky="w")
+        ttk.Label(row_add, text="用户名").pack(side=tk.LEFT)
+        ttk.Entry(row_add, textvariable=self.new_identity_var, width=18).pack(side=tk.LEFT, padx=6)
+        ttk.Label(row_add, text="属性").pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Entry(row_add, textvariable=self.new_attrs_var, width=16).pack(side=tk.LEFT, padx=6)
+        ttk.Label(row_add, text="(0/1 逗号分隔)").pack(side=tk.LEFT)
+        ttk.Button(row_add, text="添加", command=self.add_identity).pack(side=tk.LEFT, padx=(12, 0))
+        ttk.Button(row_add, text="删除选中", command=self.remove_identity).pack(side=tk.LEFT, padx=6)
         self.id_list = tk.Listbox(idf, selectmode=tk.EXTENDED, height=5, exportselection=False)
         self.id_list.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(8, 0))
 
@@ -193,7 +209,7 @@ class ABEGui(tk.Tk):
 
         hint = ttk.Label(
             parent,
-            text="说明：encrypt 使用固定策略 AND(attr0,attr1)，KEK 覆盖由 init 时的 n_users 与 keygen 的索引共同决定。",
+            text="说明：encrypt 固定 AND(attr0,attr1)；只持有 attr0 或只 attr1 的用户无法解密。属性仅影响 keygen 授权。",
             wraplength=900,
         )
         hint.grid(row=3, column=0, columnspan=3, sticky="w", pady=(12, 0))
@@ -276,14 +292,14 @@ class ABEGui(tk.Tk):
 
     def _refresh_id_widgets(self) -> None:
         self.id_list.delete(0, tk.END)
-        for uid in self.identities:
-            self.id_list.insert(tk.END, uid)
-        vals = self.identities
+        for uid, attrs in self.identity_rows:
+            self.id_list.insert(tk.END, self._format_identity_line(uid, attrs))
+        vals = self._identity_uid_list()
         for combo in (self.actor_combo, self.demo_user_combo, self.keygen_uid_combo, self.revoke_combo):
             combo["values"] = vals
-        first = self.identities[0] if self.identities else "user_alice"
+        first = vals[0] if vals else "user_alice"
         for var in (self.actor_var, self.demo_user_var, self.keygen_uid_var, self.revoke_uid_var):
-            if self.identities and var.get() not in self.identities:
+            if vals and var.get() not in vals:
                 var.set(first)
 
     def _sync_trace_sk_default(self) -> None:
@@ -291,6 +307,39 @@ class ABEGui(tk.Tk):
         uid = self.keygen_uid_var.get().strip() or "user_alice"
         safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in uid)
         self.trace_sk_var.set(os.path.join(st, "users", safe, "sk.bin"))
+
+    @staticmethod
+    def _format_identity_line(uid: str, attrs: tuple[int, ...]) -> str:
+        inner = ",".join(f"attr{a}" for a in sorted(attrs))
+        return f"{uid}  [{inner}]"
+
+    @staticmethod
+    def _parse_attrs_input(s: str) -> tuple[int, ...]:
+        """解析「0,1」「0」「1」等；仅允许 0、1，与 CP-ABE 的 attr0/attr1 一致。"""
+        raw = (s or "").strip()
+        if not raw:
+            return (0, 1)
+        out: list[int] = []
+        for part in raw.replace("，", ",").split(","):
+            p = part.strip()
+            if not p:
+                continue
+            if p not in ("0", "1"):
+                raise ValueError(f"无效属性「{p}」，仅允许 0 或 1（对应 attr0 / attr1）")
+            out.append(int(p))
+        uniq = sorted(set(out))
+        if not uniq:
+            raise ValueError("至少填写一个属性（0 或 1）")
+        return tuple(uniq)
+
+    def _identity_uid_list(self) -> list[str]:
+        return [r[0] for r in self.identity_rows]
+
+    def _attrs_for_uid(self, uid: str) -> tuple[int, ...]:
+        for u, at in self.identity_rows:
+            if u == uid:
+                return at
+        return (0, 1)
 
     def _append_log(self, title: str, cmd: list[str], proc: subprocess.CompletedProcess) -> None:
         self.log_output.insert(tk.END, f"=== {title} ===\n$ {' '.join(cmd)}\n\n")
@@ -376,11 +425,17 @@ class ABEGui(tk.Tk):
         uid = self.new_identity_var.get().strip()
         if not uid:
             return
-        if uid in self.identities:
-            messagebox.showwarning("提示", "身份已存在")
+        if uid in self._identity_uid_list():
+            messagebox.showwarning("提示", "该用户名已存在")
             return
-        self.identities.append(uid)
+        try:
+            attrs = self._parse_attrs_input(self.new_attrs_var.get())
+        except ValueError as e:
+            messagebox.showerror("属性错误", str(e))
+            return
+        self.identity_rows.append((uid, attrs))
         self.new_identity_var.set("")
+        self.new_attrs_var.set("0,1")
         self._refresh_id_widgets()
 
     def remove_identity(self) -> None:
@@ -388,10 +443,10 @@ class ABEGui(tk.Tk):
         if not idxs:
             return
         for idx in reversed(idxs):
-            uid = self.id_list.get(idx)
-            self.identities.remove(uid)
-        if not self.identities:
-            self.identities = ["user_alice"]
+            if 0 <= idx < len(self.identity_rows):
+                del self.identity_rows[idx]
+        if not self.identity_rows:
+            self.identity_rows = [("user_alice", (0, 1))]
         self._refresh_id_widgets()
 
     def preview_sidecar(self, ct_path: str) -> None:
@@ -438,6 +493,8 @@ class ABEGui(tk.Tk):
             messagebox.showerror("错误", "请填写状态目录、user_id 与数字 user_index")
             return
         cmd = [self._exe(), "keygen", st, uid, idx_s]
+        for a in self._attrs_for_uid(uid):
+            cmd.append(str(a))
         proc = _run_subprocess(cmd)
         self._append_log("keygen", cmd, proc)
         if proc.returncode == 0:

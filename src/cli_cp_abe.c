@@ -450,9 +450,45 @@ static int ensure_users_dir(const char *state) {
 }
 
 /*
+ * 可选 argv[5..]：属性下标 0、1（与 encrypt 的 AND(attr0,attr1) 一致）。缺省为 0 与 1 均授予。
+ */
+static int parse_keygen_attrs_from_argv(int argc, char **argv, int attrs_out[CP_N_ATTRS], int *n_attr_out) {
+  if (argc <= 5) {
+    attrs_out[0] = 0;
+    attrs_out[1] = 1;
+    *n_attr_out = 2;
+    return 0;
+  }
+  int seen[CP_N_ATTRS] = {0};
+  for (int i = 5; i < argc; i++) {
+    char *end = NULL;
+    long a = strtol(argv[i], &end, 10);
+    if (end == argv[i] || *end != '\0') {
+      fprintf(stderr, "keygen: invalid attr index: %s\n", argv[i]);
+      return -1;
+    }
+    if (a < 0 || a >= CP_N_ATTRS) {
+      fprintf(stderr, "keygen: attr index must be 0..%d\n", CP_N_ATTRS - 1);
+      return -1;
+    }
+    seen[a] = 1;
+  }
+  int n = 0;
+  for (int a = 0; a < CP_N_ATTRS; a++) {
+    if (seen[a]) attrs_out[n++] = a;
+  }
+  if (n == 0) {
+    fprintf(stderr, "keygen: pass at least one attribute, or omit extra args for default 0,1\n");
+    return -1;
+  }
+  *n_attr_out = n;
+  return 0;
+}
+
+/*
  * keygen：user_index ∈ [0, n_users)；policy_attr_groups 必须与后续 encrypt 相同，否则 AM 头与用户 KEK 对不齐。
  */
-static int cmd_keygen(const char *state, const char *user_id, int user_index) {
+static int cmd_keygen(const char *state, const char *user_id, int user_index, const int *attrs, int n_attr) {
   Glob g;
   int e = load_state(state, &g);
   if (e != 0) {
@@ -469,12 +505,11 @@ static int cmd_keygen(const char *state, const char *user_id, int user_index) {
   policy_attr_groups(g.n_users, &ga0, &ln0, &ga1, &ln1);
   const int *gps[CP_N_ATTRS] = {ga0, ga1};
   int glen[CP_N_ATTRS] = {ln0, ln1};
-  int attrs[] = {0, 1};
 
   abe_sk_t sk;
   abe_tk_t tk;
   abe_kek_user_t ku;
-  if (abe_aa_keygen(g.pairing, &g.pk, &g.msk, &g.apk, user_id, CP_N_ATTRS, attrs, 2, user_index, &g.tree, gps,
+  if (abe_aa_keygen(g.pairing, &g.pk, &g.msk, &g.apk, user_id, CP_N_ATTRS, attrs, n_attr, user_index, &g.tree, gps,
                     glen, &sk, &tk, &ku) != 0) {
     fprintf(stderr, "abe_aa_keygen failed\n");
     glob_clear(&g);
@@ -543,7 +578,9 @@ static int cmd_keygen(const char *state, const char *user_id, int user_index) {
   abe_tk_clear(g.pairing, &tk, CP_N_ATTRS);
   abe_kek_clear(g.pairing, &ku, CP_N_ATTRS);
   glob_clear(&g);
-  printf("OK keygen user=%s index=%d\n", safe, user_index);
+  printf("OK keygen user=%s index=%d", safe, user_index);
+  for (int i = 0; i < n_attr; i++) printf("%s%d", i ? "," : " attrs=", attrs[i]);
+  printf("\n");
   return 0;
 }
 
@@ -1123,7 +1160,8 @@ static void usage(void) {
   fprintf(stderr,
           "Usage:\n"
           "  cp_abe_cli init <state_dir> [rbits] [qbits] [n_users]\n"
-          "  cp_abe_cli keygen <state_dir> <user_id> <user_index>\n"
+          "  cp_abe_cli keygen <state_dir> <user_id> <user_index> [attr_idx ...]\n"
+          "      (attr_idx: 0..1, default both; 密文策略为 AND(attr0,attr1) 时需含 0 与 1 才可解密)\n"
           "  cp_abe_cli encrypt <state_dir> <infile> <out.ct> <owner> <source_name>\n"
           "  cp_abe_cli decrypt <state_dir> <user_id> <in.ct> <outfile>\n"
           "  cp_abe_cli trace <state_dir> <leaked_sk.bin>\n"
@@ -1148,7 +1186,10 @@ int main(int argc, char **argv) {
   }
   if (strcmp(cmd, "keygen") == 0) {
     if (argc < 5) return 1;
-    return cmd_keygen(argv[2], argv[3], atoi(argv[4]));
+    int kg_attrs[CP_N_ATTRS];
+    int kg_n = 0;
+    if (parse_keygen_attrs_from_argv(argc, argv, kg_attrs, &kg_n) != 0) return 1;
+    return cmd_keygen(argv[2], argv[3], atoi(argv[4]), kg_attrs, kg_n);
   }
   if (strcmp(cmd, "encrypt") == 0) {
     if (argc < 7) return 1;
