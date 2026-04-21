@@ -457,6 +457,7 @@ int abe_csp_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_apk_t *apk,
 int abe_du_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ct_t *ct, const abe_sk_t *sk,
                    const element_t *tct, const int *auth_rows, int rn, const element_t *w,
                    uint8_t **msg_out, size_t *msg_len_out) {
+  (void)pk;
   element_t zinv, tct_pow, P, tmp_g1, row_acc;
   element_init_Zr(zinv, pairing);
   element_init_GT(tct_pow, pairing);
@@ -479,35 +480,6 @@ int abe_du_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ct_t *ct, co
   element_mul(Rp, Rp, P);
   pairing_apply(eK, sk->K, ct->Cp, pairing);
   element_div(Rp, Rp, eK);
-
-  /* 临时诊断：确认 R' 恢复链路是否与密文里的 R 一致。 */
-  int rp_eq_r = (element_cmp(Rp, ct->R) == 0);
-  uint8_t rbuf_rp[element_length_in_bytes(Rp)];
-  uint8_t rbuf_r[element_length_in_bytes(ct->R)];
-  element_to_bytes(rbuf_rp, Rp);
-  element_to_bytes(rbuf_r, ct->R);
-  element_t k_rp, k_r;
-  element_init_Zr(k_rp, pairing);
-  element_init_Zr(k_r, pairing);
-  hash_to_zr(pairing, k_rp, "symk", rbuf_rp, sizeof(rbuf_rp));
-  hash_to_zr(pairing, k_r, "symk", rbuf_r, sizeof(rbuf_r));
-  uint8_t k32_rp[32], k32_r[32];
-  memset(k32_rp, 0, sizeof(k32_rp));
-  memset(k32_r, 0, sizeof(k32_r));
-  element_to_bytes(k32_rp, k_rp);
-  element_to_bytes(k32_r, k_r);
-  uint8_t *diag_pt = NULL;
-  size_t diag_len = 0;
-  int rc_rp = sym_decrypt_aes256_cbc(k32_rp, ct->ct_sym, ct->ct_sym_len, &diag_pt, &diag_len);
-  if (rc_rp == 0) free(diag_pt);
-  diag_pt = NULL;
-  diag_len = 0;
-  int rc_r = sym_decrypt_aes256_cbc(k32_r, ct->ct_sym, ct->ct_sym_len, &diag_pt, &diag_len);
-  if (rc_r == 0) free(diag_pt);
-  fprintf(stderr, "[DU DIAG] Rp==R ? %d\n", rp_eq_r ? 1 : 0);
-  fprintf(stderr, "[DU DIAG] dec_by_Rp=%d dec_by_R=%d\n", rc_rp, rc_r);
-  element_clear(k_rp);
-  element_clear(k_r);
 
   uint8_t rbuf[element_length_in_bytes(Rp)];
   element_to_bytes(rbuf, Rp);
