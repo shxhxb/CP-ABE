@@ -395,6 +395,29 @@ int abe_am_encrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ask_t *ask, 
   return 0;
 }
 
+int abe_upkek(pairing_t pairing, abe_kek_user_t *ku, int attr_idx, const element_t sigma) {
+  (void)pairing;
+  if (!ku || !ku->kek || !ku->phi_node) return -1;
+  if (attr_idx < 0) return -2;
+  if (ku->phi_node[attr_idx] < 0) return -3;
+  element_pow_zn(ku->kek[attr_idx], ku->kek[attr_idx], sigma);
+  return 0;
+}
+
+int abe_am_reencrypt(pairing_t pairing, abe_ct_t *ct, int attr_idx, const element_t sigma) {
+  if (!ct || !ct->E_hdr || attr_idx < 0 || attr_idx >= ct->n_hdr || !ct->E_hdr[attr_idx]) return -1;
+  element_t inv_sigma;
+  element_init_Zr(inv_sigma, pairing);
+  if (element_is0(sigma)) {
+    element_clear(inv_sigma);
+    return -2;
+  }
+  element_invert(inv_sigma, sigma);
+  element_pow_zn(*ct->E_hdr[attr_idx], *ct->E_hdr[attr_idx], inv_sigma);
+  element_clear(inv_sigma);
+  return 0;
+}
+
 /* CSP：分子含 TK 与 Cp 的配对、分母含 KEK×E_hdr；输出 tct = 外包变换后的 GT 元素 */
 int abe_csp_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_apk_t *apk, const abe_ct_t *ct,
                     const abe_tk_t *tk, const abe_kek_user_t *ku, const int *auth_rows, int rn,

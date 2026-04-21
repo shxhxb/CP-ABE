@@ -725,6 +725,117 @@ static int load_user_keys(Glob *g, const char *state, const char *user_id, abe_s
   return 0;
 }
 
+static int save_user_ku(pairing_t pairing, const char *state, const char *user_id, const abe_kek_user_t *ku) {
+  (void)pairing;
+  char safe[128];
+  sanitize_uid(user_id, safe, sizeof(safe));
+  char udir[512];
+  path_join3(udir, sizeof(udir), state, "users", safe);
+  char p[640];
+  path_join(p, sizeof(p), udir, "ku.bin");
+  FILE *f = fopen(p, "wb");
+  if (!f) return -1;
+  int rc = abe_state_save_ku(f, ku, CP_N_ATTRS);
+  fclose(f);
+  return rc;
+}
+
+/*
+ * 属性撤销（最小落地）：对给定属性 att 执行 UpKEK（仅更新 keep_user 列表中的用户 ku）
+ * 并对给定密文执行 AMReEncrypt，输出新密文。用于演示论文 UpKEK+AMReEncrypt 主流程。
+ */
+static int cmd_attr_revoke(const char *state, int att_idx, const char *in_ct, const char *out_ct, int n_keep,
+                           char **keep_users) {
+  if (att_idx < 0 || att_idx >= CP_N_ATTRS) {
+    fprintf(stderr, "attr_idx must be 0..%d\n", CP_N_ATTRS - 1);
+    return 1;
+  }
+  if (n_keep <= 0) {
+    fprintf(stderr, "need at least one keep_user_id\n");
+    return 1;
+  }
+  Glob g;
+  if (load_state(state, &g) != 0) {
+    fprintf(stderr, "load_state failed\n");
+    return 1;
+  }
+
+  element_t sigma;
+  element_init_Zr(sigma, g.pairing);
+  do {
+    element_random(sigma);
+  } while (element_is0(sigma));
+
+  for (int i = 0; i < n_keep; i++) {
+    abe_sk_t sk;
+    abe_tk_t tk;
+    abe_kek_user_t ku;
+    memset(&sk, 0, sizeof(sk));
+    memset(&tk, 0, sizeof(tk));
+    memset(&ku, 0, sizeof(ku));
+    if (load_user_keys(&g, state, keep_users[i], &sk, &tk, &ku) != 0) {
+      fprintf(stderr, "load user keys failed: %s\n", keep_users[i]);
+      element_clear(sigma);
+      glob_clear(&g);
+      return 1;
+    }
+    if (abe_upkek(g.pairing, &ku, att_idx, sigma) == 0) {
+      if (save_user_ku(g.pairing, state, keep_users[i], &ku) != 0) {
+        fprintf(stderr, "save ku failed: %s\n", keep_users[i]);
+        abe_sk_clear(g.pairing, &sk);
+        abe_tk_clear(g.pairing, &tk, CP_N_ATTRS);
+        abe_kek_clear(g.pairing, &ku, CP_N_ATTRS);
+        element_clear(sigma);
+        glob_clear(&g);
+        return 1;
+      }
+    }
+    abe_sk_clear(g.pairing, &sk);
+    abe_tk_clear(g.pairing, &tk, CP_N_ATTRS);
+    abe_kek_clear(g.pairing, &ku, CP_N_ATTRS);
+  }
+
+  FILE *fi = cp_fopen_utf8(in_ct, "rb");
+  if (!fi) {
+    fprintf(stderr, "open in.ct failed: %s\n", in_ct ? in_ct : "");
+    element_clear(sigma);
+    glob_clear(&g);
+    return 1;
+  }
+  abe_ct_t ct;
+  abe_ct_init(&ct);
+  if (abe_ct_load(g.pairing, &ct, fi) != 0) {
+    fclose(fi);
+    fprintf(stderr, "load ct failed\n");
+    element_clear(sigma);
+    glob_clear(&g);
+    return 1;
+  }
+  fclose(fi);
+  if (abe_am_reencrypt(g.pairing, &ct, att_idx, sigma) != 0) {
+    fprintf(stderr, "AMReEncrypt failed\n");
+    abe_ct_clear(g.pairing, &ct);
+    element_clear(sigma);
+    glob_clear(&g);
+    return 1;
+  }
+  FILE *fo = cp_fopen_utf8(out_ct, "wb");
+  if (!fo || abe_ct_save(g.pairing, &ct, fo) != 0) {
+    fprintf(stderr, "save out.ct failed: %s\n", out_ct ? out_ct : "");
+    if (fo) fclose(fo);
+    abe_ct_clear(g.pairing, &ct);
+    element_clear(sigma);
+    glob_clear(&g);
+    return 1;
+  }
+  fclose(fo);
+  abe_ct_clear(g.pairing, &ct);
+  element_clear(sigma);
+  glob_clear(&g);
+  printf("OK attr-revoke att=%d -> %s\n", att_idx, out_ct);
+  return 0;
+}
+
 /*
  * decrypt：auth_rows={0,1} 表示「两行策略都满足」；先 lsss_recover 得 w，再 CSP（外包）得 tct，DU 用 sk+z 解对称密文。
  */
@@ -1180,6 +1291,7 @@ static void usage(void) {
           "  cp_abe_cli decrypt <state_dir> <user_id> <in.ct> <outfile>\n"
           "  cp_abe_cli trace <state_dir> <leaked_sk.bin>\n"
           "  cp_abe_cli revoke <state_dir> <user_id>\n"
+          "  cp_abe_cli attr-revoke <state_dir> <attr_idx> <in.ct> <out.ct> <keep_user_id ...>\n"
           "  cp_abe_cli demo [user_id] [message]\n"
           "  cp_abe_cli roundtrip-bin   (self-test ct serialize)\n");
 }
@@ -1220,6 +1332,10 @@ int main(int argc, char **argv) {
   if (strcmp(cmd, "revoke") == 0) {
     if (argc < 4) return 1;
     return cmd_revoke(argv[2], argv[3]);
+  }
+  if (strcmp(cmd, "attr-revoke") == 0) {
+    if (argc < 7) return 1;
+    return cmd_attr_revoke(argv[2], atoi(argv[3]), argv[4], argv[5], argc - 6, &argv[6]);
   }
   if (strcmp(cmd, "demo") == 0) {
     const char *uid = argc >= 3 ? argv[2] : "user_alice";

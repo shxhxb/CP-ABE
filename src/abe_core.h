@@ -123,6 +123,12 @@ int abe_am_encrypt(pairing_t pairing, const abe_pk_t *pk, const abe_ask_t *ask, 
                    kek_tree_t *tree, const int *const *attr_groups, const int *attr_group_lens,
                    abe_ct_t *ct);
 
+/* 属性撤销：对未撤销用户的属性群密钥执行 UpKEK（KEK_i <- KEK_i^sigma） */
+int abe_upkek(pairing_t pairing, abe_kek_user_t *ku, int attr_idx, const element_t sigma);
+
+/* 属性撤销：对密文执行 AMReEncrypt（E_hdr[attr] <- E_hdr[attr]^(1/sigma)） */
+int abe_am_reencrypt(pairing_t pairing, abe_ct_t *ct, int attr_idx, const element_t sigma);
+
 /* CSP 外包解密：用 TK+KEK 与 LSSS 系数 w 得到中间量 tct ∈ GT */
 int abe_csp_decrypt(pairing_t pairing, const abe_pk_t *pk, const abe_apk_t *apk, const abe_ct_t *ct,
                     const abe_tk_t *tk, const abe_kek_user_t *ku, const int *auth_rows, int rn,
