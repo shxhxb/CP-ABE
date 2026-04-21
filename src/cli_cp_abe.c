@@ -773,6 +773,20 @@ static int cmd_decrypt(const char *state, const char *user_id, const char *inpat
   fclose(fi);
 
   int auth_rows[] = {0, 1};
+  /* 严格策略检查：AND(attr0,attr1) 下，任一策略行绑定属性未授权则直接失败。 */
+  for (int i = 0; i < 2; i++) {
+    int row = auth_rows[i];
+    int att = (row >= 0 && row < ct.l) ? ct.rho[row] : -1;
+    if (att < 0 || att >= CP_N_ATTRS || ku.phi_node[att] < 0) {
+      abe_ct_clear(g.pairing, &ct);
+      abe_sk_clear(g.pairing, &sk);
+      abe_tk_clear(g.pairing, &tk, CP_N_ATTRS);
+      abe_kek_clear(g.pairing, &ku, CP_N_ATTRS);
+      glob_clear(&g);
+      fprintf(stderr, "policy unsatisfied for user '%s'\n", user_id ? user_id : "");
+      return 1;
+    }
+  }
   element_t w[2];
   element_init_Zr(w[0], g.pairing);
   element_init_Zr(w[1], g.pairing);

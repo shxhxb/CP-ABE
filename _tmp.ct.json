@@ -1,0 +1,8 @@
+{
+  "format": "cpabe-core-v1",
+  "policy": "AND(attr0,attr1)",
+  "owner_label": "ownerA",
+  "source_name": "sourceA",
+  "state_dir": ".\\_tmp_state",
+  "cipher_file": ".\\_tmp.ct"
+}
